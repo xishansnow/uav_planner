@@ -10,6 +10,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -46,10 +47,9 @@ protected:
     this->declare_parameter("goal_tolerance", 0.5);
     this->declare_parameter("robot_radius", 0.3);
     this->declare_parameter("map_resolution", 0.1);
-    this->declare_parameter("map_width", 100);
-    this->declare_parameter("map_height", 100);
     this->declare_parameter("origin_x", -5.0);
     this->declare_parameter("origin_y", -5.0);
+    this->declare_parameter("origin_z", 0.0);
 
     // Get parameters
     planner_frequency_ = this->get_parameter("planner_frequency").as_double();
@@ -57,18 +57,17 @@ protected:
     goal_tolerance_ = this->get_parameter("goal_tolerance").as_double();
     robot_radius_ = this->get_parameter("robot_radius").as_double();
     map_resolution_ = this->get_parameter("map_resolution").as_double();
-    map_width_ = this->get_parameter("map_width").as_int();
-    map_height_ = this->get_parameter("map_height").as_int();
     origin_x_ = this->get_parameter("origin_x").as_double();
     origin_y_ = this->get_parameter("origin_y").as_double();
+    origin_z_ = this->get_parameter("origin_z").as_double();
 
     // Initialize TF
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
 
-    // Initialize SBPL planner
+    // Initialize SBPL planner with octomap support
     sbpl_planner_ = std::make_unique<UAV_Sbpl_Planner>(
-      map_width_, map_height_, map_resolution_, origin_x_, origin_y_);
+      map_resolution_, origin_x_, origin_y_, origin_z_);
 
     // Create action server
     this->action_server_ = rclcpp_action::create_server<ComputePathToPose>(
@@ -87,6 +86,9 @@ protected:
 
     scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
       "scan", 10, std::bind(&SBPLPathPlannerNode::scanCallback, this, std::placeholders::_1));
+
+    pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+      "pointcloud", 10, std::bind(&SBPLPathPlannerNode::pointcloudCallback, this, std::placeholders::_1));
 
     // Create timer for periodic planning
     planning_timer_ = this->create_wall_timer(
@@ -132,6 +134,7 @@ private:
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::TimerBase::SharedPtr planning_timer_;
 
   // Parameters
@@ -140,10 +143,9 @@ private:
   double goal_tolerance_;
   double robot_radius_;
   double map_resolution_;
-  int map_width_;
-  int map_height_;
   double origin_x_;
   double origin_y_;
+  double origin_z_;
 
   // Current robot state
   geometry_msgs::msg::PoseStamped current_pose_;
@@ -185,15 +187,15 @@ private:
     goal_pose_ = goal->goal;
     has_goal_ = true;
 
-    // Plan path
+    // Plan path using 3D planning
     nav_msgs::msg::Path path;
-    if (planPath(current_pose_, goal_pose_, path)) {
+    if (planPath3D(current_pose_, goal_pose_, path)) {
       result->path = path;
       goal_handle->succeed(result);
-      RCLCPP_INFO(this->get_logger(), "Path planning completed successfully");
+      RCLCPP_INFO(this->get_logger(), "3D Path planning completed successfully");
     } else {
       goal_handle->abort(result);
-      RCLCPP_ERROR(this->get_logger(), "Path planning failed");
+      RCLCPP_ERROR(this->get_logger(), "3D Path planning failed");
     }
   }
 
@@ -205,9 +207,27 @@ private:
 
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
   {
-    // Update occupancy grid based on laser scan
+    // 获取传感器姿态
+    geometry_msgs::msg::PoseStamped sensor_pose;
+    sensor_pose.header = msg->header;
+    sensor_pose.pose = current_pose_.pose;  // 假设传感器在机器人中心
+    
+    // 更新octomap
     if (sbpl_planner_) {
-      // sbpl_planner_->updateMapFromScan(*msg);
+      sbpl_planner_->updateMapFromScan(*msg, sensor_pose);
+    }
+  }
+
+  void pointcloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+  {
+    // 获取传感器姿态
+    geometry_msgs::msg::PoseStamped sensor_pose;
+    sensor_pose.header = msg->header;
+    sensor_pose.pose = current_pose_.pose;  // 假设传感器在机器人中心
+    
+    // 更新octomap
+    if (sbpl_planner_) {
+      sbpl_planner_->updateMapFromPointCloud(*msg, sensor_pose);
     }
   }
 
@@ -215,7 +235,7 @@ private:
   {
     if (has_goal_ && sbpl_planner_) {
       nav_msgs::msg::Path path;
-      if (planPath(current_pose_, goal_pose_, path)) {
+      if (planPath3D(current_pose_, goal_pose_, path)) {
         current_path_ = path;
         path_pub_->publish(path);
         
@@ -225,6 +245,45 @@ private:
         }
       }
     }
+  }
+
+  bool planPath3D(
+    const geometry_msgs::msg::PoseStamped & start,
+    const geometry_msgs::msg::PoseStamped & goal,
+    nav_msgs::msg::Path & path)
+  {
+    if (!sbpl_planner_) {
+      return false;
+    }
+
+    // 使用3D路径规划
+    std::vector<std::pair<double, double>> xy_path;
+    std::vector<double> z_path;
+    
+    if (sbpl_planner_->planPath(
+        start.pose.position.x, start.pose.position.y, start.pose.position.z,
+        goal.pose.position.x, goal.pose.position.y, goal.pose.position.z,
+        xy_path, z_path, max_planning_time_)) {
+      
+      // 转换为ROS路径消息
+      path.header.frame_id = "map";
+      path.header.stamp = this->now();
+      path.poses.clear();
+
+      for (size_t i = 0; i < xy_path.size(); ++i) {
+        geometry_msgs::msg::PoseStamped pose;
+        pose.header = path.header;
+        pose.pose.position.x = xy_path[i].first;
+        pose.pose.position.y = xy_path[i].second;
+        pose.pose.position.z = z_path[i];
+        pose.pose.orientation.w = 1.0;
+        path.poses.push_back(pose);
+      }
+
+      return true;
+    }
+
+    return false;
   }
 
   bool planPath(
@@ -281,7 +340,8 @@ private:
     // Calculate distance and angle to next waypoint
     double dx = next_waypoint.pose.position.x - current_pose_.pose.position.x;
     double dy = next_waypoint.pose.position.y - current_pose_.pose.position.y;
-    double distance = std::sqrt(dx * dx + dy * dy);
+    double dz = next_waypoint.pose.position.z - current_pose_.pose.position.z;
+    double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
     double angle = std::atan2(dy, dx);
 
     // Simple proportional control
@@ -289,9 +349,11 @@ private:
     if (distance > goal_tolerance_) {
       cmd_vel.linear.x = std::min(0.5, distance * 0.5);  // Proportional linear velocity
       cmd_vel.angular.z = angle * 1.0;  // Proportional angular velocity
+      cmd_vel.linear.z = dz * 0.5;  // Vertical velocity for 3D movement
     } else {
       cmd_vel.linear.x = 0.0;
       cmd_vel.angular.z = 0.0;
+      cmd_vel.linear.z = 0.0;
     }
 
     cmd_vel_pub_->publish(cmd_vel);
@@ -302,7 +364,7 @@ private:
     grid_x = static_cast<int>((world_x - origin_x_) / map_resolution_);
     grid_y = static_cast<int>((world_y - origin_y_) / map_resolution_);
     
-    return grid_x >= 0 && grid_x < map_width_ && grid_y >= 0 && grid_y < map_height_;
+    return grid_x >= 0 && grid_x < 1000 && grid_y >= 0 && grid_y < 1000;
   }
 
   void gridToWorld(int grid_x, int grid_y, double & world_x, double & world_y)

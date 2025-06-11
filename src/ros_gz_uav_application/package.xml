@@ -28,7 +28,13 @@
   <depend>angles</depend>
 
   <!-- SBPL dependencies -->
-  <depend>sbpl</depend>
+  <!-- <depend>sbpl</depend> -->
+
+  <!-- Octomap dependencies -->
+  <depend>octomap</depend>
+
+  <!-- YAML-CPP dependencies -->
+  <depend>yaml-cpp</depend>
 
   <test_depend>ament_lint_auto</test_depend>
 
