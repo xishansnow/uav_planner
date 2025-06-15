@@ -12,10 +12,16 @@ def generate_launch_description():
     pkg_dir = get_package_share_directory('ros_gz_uav_application')
     
     # Declare launch arguments
+    config_file_arg = DeclareLaunchArgument(
+        'config_file',
+        default_value=os.path.join(pkg_dir, 'config', 'global_path_planner_params.yaml'),
+        description='Path to YAML configuration file'
+    )
+    
     planner_type_arg = DeclareLaunchArgument(
         'planner_type',
         default_value='astar',
-        description='Type of planner to use (astar, thetastar, arastar)'
+        description='Type of planner to use (astar, thetastar, arastar, jps)'
     )
     
     octomap_file_arg = DeclareLaunchArgument(
@@ -55,6 +61,7 @@ def generate_launch_description():
         name='global_path_planner',
         output='screen',
         parameters=[{
+            'config_file': LaunchConfiguration('config_file'),
             'planner_type': LaunchConfiguration('planner_type'),
             'octomap_file': LaunchConfiguration('octomap_file'),
             'environment_file': LaunchConfiguration('environment_file'),
@@ -75,6 +82,7 @@ def generate_launch_description():
     )
     
     return LaunchDescription([
+        config_file_arg,
         planner_type_arg,
         octomap_file_arg,
         environment_file_arg,

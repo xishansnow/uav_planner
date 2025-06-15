@@ -1,0 +1,24 @@
+global_path_planner_node:
+  ros__parameters:
+    # 规划器类型
+    planner_type: "astar"  # astar, thetastar, arastar, jps
+    
+    # 规划参数
+    planner_frequency: 1.0
+    max_planning_time: 5.0
+    goal_tolerance: 0.5
+    robot_radius: 0.3
+    map_resolution: 0.1
+    
+    # 环境原点
+    origin_x: -5.0
+    origin_y: -5.0
+    origin_z: 0.0
+    
+    # 环境尺寸参数
+    env_width: 200.0
+    env_height: 200.0
+    env_depth: 100.0
+    voxel_width: 200
+    voxel_height: 200
+    voxel_depth: 100 

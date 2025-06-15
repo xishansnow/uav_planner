@@ -27,11 +27,9 @@
   <depend>pluginlib</depend>
   <depend>angles</depend>
 
-  <!-- SBPL dependencies -->
-  <!-- <depend>sbpl</depend> -->
-
   <!-- Octomap dependencies -->
   <depend>octomap</depend>
+  <depend>octomap_msgs</depend>
 
   <!-- YAML-CPP dependencies -->
   <depend>yaml-cpp</depend>

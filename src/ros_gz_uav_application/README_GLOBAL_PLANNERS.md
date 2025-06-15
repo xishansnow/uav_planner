@@ -215,7 +215,7 @@ src/ros_gz_uav_application/src/
 ├── arastar_planner.hpp/cpp              # ARA*算法
 ├── planner_factory.hpp/cpp              # 工厂类
 ├── global_path_planner_node.cpp         # ROS2节点
-└── environment_voxel3d.cpp              # 环境类
+└── env/environment_voxel3d.cpp              # 环境类
 
 launch/
 └── global_planner.launch.py             # 启动文件
